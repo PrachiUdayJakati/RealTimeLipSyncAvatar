@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Lipsync Avatar</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-video"></i> Real-Time Lipsync Avatar
+            </span>
+            <div class="d-flex">
+                <span class="badge bg-success me-2" id="status-badge">Ready</span>
+                <button class="btn btn-outline-light btn-sm" onclick="showSystemInfo()">
+                    <i class="fas fa-info-circle"></i> System Info
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Main Interface -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-magic"></i> Generate Lipsync Video</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="generateForm" enctype="multipart/form-data">
+                            <!-- Image Upload -->
+                            <div class="mb-3">
+                                <label for="imageFile" class="form-label">
+                                    <i class="fas fa-image"></i> Upload Image
+                                </label>
+                                <input type="file" class="form-control" id="imageFile" name="image"
+                                       accept="image/*" required>
+                                <div class="form-text">
+                                    Upload a clear photo of a person's face (JPG, PNG, WebP)
+                                </div>
+                            </div>
+
+                            <!-- Text Input -->
+                            <div class="mb-3">
+                                <label for="textInput" class="form-label">
+                                    <i class="fas fa-comment"></i> Text to Speech
+                                </label>
+                                <textarea class="form-control" id="textInput" name="text" rows="3"
+                                          placeholder="Enter the text you want the person to say..." required></textarea>
+                                <div class="form-text">
+                                    <span id="charCount">0</span> characters
+                                </div>
+                            </div>
+
+                            <!-- Voice Selection -->
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label for="voiceSelect" class="form-label">
+                                        <i class="fas fa-microphone"></i> Voice
+                                    </label>
+                                    <select class="form-select" id="voiceSelect" name="voice">
+                                        <option value="Rachel">Rachel (Default)</option>
+                                        {% for provider, voices in available_voices.items() %}
+                                            <optgroup label="{{ provider.title() }}">
+                                                {% for voice in voices %}
+                                                    <option value="{{ voice }}">{{ voice }}</option>
+                                                {% endfor %}
+                                            </optgroup>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="modelSelect" class="form-label">
+                                        <i class="fas fa-brain"></i> AI Model
+                                    </label>
+                                    <select class="form-select" id="modelSelect" name="model_id">
+                                        <option value="">Auto (Current Model)</option>
+                                        {% for model_id, model_info in available_models.items() %}
+                                            <option value="{{ model_id }}">
+                                                {{ model_info.name }} - {{ model_info.quality|title }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Advanced Options -->
+                            <div class="mb-3">
+                                <button class="btn btn-outline-secondary btn-sm" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#advancedOptions">
+                                    <i class="fas fa-cog"></i> Advanced Options
+                                </button>
+                            </div>
+
+                            <div class="collapse" id="advancedOptions">
+                                <div class="card card-body mb-3">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <label for="providerSelect" class="form-label">TTS Provider</label>
+                                            <select class="form-select" id="providerSelect" name="provider">
+                                                <option value="">Auto</option>
+                                                <option value="elevenlabs">ElevenLabs</option>
+                                                <option value="edge_tts">Edge TTS</option>
+                                                <option value="espnet">ESPnet</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="qualitySelect" class="form-label">Quality</label>
+                                            <select class="form-select" id="qualitySelect">
+                                                <option value="high">High Quality (Slower)</option>
+                                                <option value="medium" selected>Medium Quality</option>
+                                                <option value="fast">Fast (Lower Quality)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Generate Button -->
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
+                                    <i class="fas fa-play"></i> Generate Video
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Progress -->
+                        <div id="progressContainer" class="mt-3" style="display: none;">
+                            <div class="progress">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="text-center mt-2">
+                                <small id="progressText">Processing...</small>
+                            </div>
+                        </div>
+
+                        <!-- Result -->
+                        <div id="resultContainer" class="mt-3" style="display: none;">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6><i class="fas fa-check-circle text-success"></i> Video Generated Successfully!</h6>
+                                </div>
+                                <div class="card-body">
+                                    <video id="resultVideo" controls class="w-100 mb-3" style="max-height: 400px;">
+                                        Your browser does not support the video tag.
+                                    </video>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-success" onclick="downloadVideo()">
+                                            <i class="fas fa-download"></i> Download
+                                        </button>
+                                        <button class="btn btn-secondary" onclick="shareVideo()">
+                                            <i class="fas fa-share"></i> Share
+                                        </button>
+                                        <button class="btn btn-outline-primary" onclick="generateAnother()">
+                                            <i class="fas fa-plus"></i> Generate Another
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-4">
+                <!-- System Status -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6><i class="fas fa-server"></i> System Status</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-6">
+                                <div class="border-end">
+                                    <h5 class="text-primary" id="gpu-usage">{{ stats.allocated_vram|round(1) if stats.allocated_vram else 0 }}GB</h5>
+                                    <small class="text-muted">GPU VRAM</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <h5 class="text-success" id="ram-usage">{{ stats.ram_available|round(1) if stats.ram_available else 0 }}GB</h5>
+                                <small class="text-muted">RAM Available</small>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="d-flex justify-content-between">
+                            <span>Current Model:</span>
+                            <span class="badge bg-primary" id="current-model">
+                                {{ stats.current_model or 'None' }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Examples -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6><i class="fas fa-lightbulb"></i> Quick Examples</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadExample('greeting')">
+                                👋 Greeting
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadExample('presentation')">
+                                📊 Presentation
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadExample('story')">
+                                📚 Story Telling
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" onclick="loadExample('news')">
+                                📰 News Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Generations -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6><i class="fas fa-history"></i> Recent Generations</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentList">
+                            <p class="text-muted text-center">No recent generations</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Info Modal -->
+    <div class="modal fade" id="systemInfoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-info-circle"></i> System Information</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="systemInfoContent">
+                        Loading...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Global variables
+        let currentVideoBlob = null;
+        let currentVideoUrl = null;
+
+        // Examples data
+        const examples = {
+            greeting: "Hello! Welcome to our amazing real-time lipsync avatar system. I'm excited to demonstrate how this technology can bring any photo to life with natural speech and lip movements.",
+            presentation: "Good morning everyone. Today I'll be presenting our quarterly results and discussing the strategic initiatives that will drive our company forward in the coming months.",
+            story: "Once upon a time, in a land far away, there lived a curious inventor who dreamed of creating machines that could speak and move like real people. Little did they know, their dream would soon become reality.",
+            news: "Breaking news: Scientists have developed revolutionary AI technology that can generate realistic talking avatars from a single photograph, opening new possibilities for digital communication."
+        };
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCharCount();
+            loadRecentGenerations();
+            updateSystemStatus();
+
+            // Set up event listeners
+            document.getElementById('textInput').addEventListener('input', updateCharCount);
+            document.getElementById('generateForm').addEventListener('submit', handleGenerate);
+
+            // Auto-refresh system status
+            setInterval(updateSystemStatus, 5000);
+        });
+
+        // Character count
+        function updateCharCount() {
+            const text = document.getElementById('textInput').value;
+            document.getElementById('charCount').textContent = text.length;
+        }
+
+        // Load example text
+        function loadExample(type) {
+            document.getElementById('textInput').value = examples[type];
+            updateCharCount();
+        }
+
+        // Handle form submission
+        async function handleGenerate(event) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            const generateBtn = document.getElementById('generateBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const resultContainer = document.getElementById('resultContainer');
+
+            // Validate inputs
+            if (!formData.get('image') || !formData.get('text')) {
+                alert('Please provide both an image and text.');
+                return;
+            }
+
+            // Show progress
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+            progressContainer.style.display = 'block';
+            resultContainer.style.display = 'none';
+
+            updateProgress(10, 'Uploading image...');
+
+            try {
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                updateProgress(50, 'Generating audio...');
+
+                // Get the video blob
+                const videoBlob = await response.blob();
+                currentVideoBlob = videoBlob;
+
+                updateProgress(90, 'Finalizing video...');
+
+                // Create video URL and display
+                if (currentVideoUrl) {
+                    URL.revokeObjectURL(currentVideoUrl);
+                }
+                currentVideoUrl = URL.createObjectURL(videoBlob);
+
+                const videoElement = document.getElementById('resultVideo');
+                videoElement.src = currentVideoUrl;
+
+                updateProgress(100, 'Complete!');
+
+                // Show result
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    resultContainer.style.display = 'block';
+                    addToRecentGenerations(formData.get('text'), currentVideoUrl);
+                }, 500);
+
+            } catch (error) {
+                console.error('Generation failed:', error);
+                alert('Video generation failed. Please try again.');
+                progressContainer.style.display = 'none';
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = '<i class="fas fa-play"></i> Generate Video';
+            }
+        }
+
+        // Update progress bar
+        function updateProgress(percent, text) {
+            const progressBar = document.querySelector('.progress-bar');
+            const progressText = document.getElementById('progressText');
+
+            progressBar.style.width = percent + '%';
+            progressText.textContent = text;
+        }
+
+        // Download video
+        function downloadVideo() {
+            if (!currentVideoBlob) return;
+
+            const a = document.createElement('a');
+            a.href = currentVideoUrl;
+            a.download = `lipsync_video_${Date.now()}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        // Share video
+        function shareVideo() {
+            if (navigator.share && currentVideoBlob) {
+                const file = new File([currentVideoBlob], 'lipsync_video.mp4', { type: 'video/mp4' });
+                navigator.share({
+                    title: 'Lipsync Avatar Video',
+                    text: 'Check out this AI-generated lipsync video!',
+                    files: [file]
+                });
+            } else {
+                // Fallback: copy URL to clipboard
+                navigator.clipboard.writeText(window.location.href).then(() => {
+                    alert('Link copied to clipboard!');
+                });
+            }
+        }
+
+        // Generate another video
+        function generateAnother() {
+            document.getElementById('resultContainer').style.display = 'none';
+            document.getElementById('generateForm').reset();
+            updateCharCount();
+        }
+
+        // Update system status
+        async function updateSystemStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+
+                // Update GPU usage
+                if (status.models && status.models.system_stats) {
+                    const stats = status.models.system_stats;
+                    document.getElementById('gpu-usage').textContent =
+                        (stats.allocated_vram || 0).toFixed(1) + 'GB';
+                    document.getElementById('ram-usage').textContent =
+                        (stats.ram_available || 0).toFixed(1) + 'GB';
+                    document.getElementById('current-model').textContent =
+                        stats.current_model || 'None';
+                }
+
+                // Update status badge
+                document.getElementById('status-badge').textContent = 'Ready';
+                document.getElementById('status-badge').className = 'badge bg-success me-2';
+
+            } catch (error) {
+                console.error('Failed to update status:', error);
+                document.getElementById('status-badge').textContent = 'Error';
+                document.getElementById('status-badge').className = 'badge bg-danger me-2';
+            }
+        }
+
+        // Show system info modal
+        async function showSystemInfo() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+
+                const content = document.getElementById('systemInfoContent');
+                content.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>AI Models</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>Current:</strong> ${status.models?.current_model || 'None'}</li>
+                                <li><strong>Available:</strong> ${Object.keys(status.models?.available_models || {}).join(', ')}</li>
+                            </ul>
+
+                            <h6>System Resources</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>GPU:</strong> ${status.models?.system_stats?.gpu_name || 'N/A'}</li>
+                                <li><strong>VRAM:</strong> ${(status.models?.system_stats?.allocated_vram || 0).toFixed(1)}GB / ${(status.models?.system_stats?.total_vram || 0).toFixed(1)}GB</li>
+                                <li><strong>RAM:</strong> ${(status.models?.system_stats?.ram_available || 0).toFixed(1)}GB available</li>
+                                <li><strong>CPU:</strong> ${(status.models?.system_stats?.cpu_usage || 0).toFixed(1)}%</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>TTS Providers</h6>
+                            <ul class="list-unstyled">
+                                ${Object.entries(status.tts?.stats?.providers || {}).map(([name, config]) =>
+                                    `<li><strong>${name}:</strong> ${config.enabled ? '✅' : '❌'}</li>`
+                                ).join('')}
+                            </ul>
+
+                            <h6>Cache</h6>
+                            <ul class="list-unstyled">
+                                <li><strong>Files:</strong> ${status.tts?.stats?.cache_files || 0}</li>
+                                <li><strong>Size:</strong> ${(status.tts?.stats?.cache_size_mb || 0).toFixed(1)}MB</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+
+                const modal = new bootstrap.Modal(document.getElementById('systemInfoModal'));
+                modal.show();
+
+            } catch (error) {
+                console.error('Failed to load system info:', error);
+            }
+        }
+
+        // Recent generations management
+        function addToRecentGenerations(text, videoUrl) {
+            const recent = JSON.parse(localStorage.getItem('recentGenerations') || '[]');
+            recent.unshift({
+                text: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+                timestamp: Date.now(),
+                url: videoUrl
+            });
+
+            // Keep only last 5
+            recent.splice(5);
+            localStorage.setItem('recentGenerations', JSON.stringify(recent));
+            loadRecentGenerations();
+        }
+
+        function loadRecentGenerations() {
+            const recent = JSON.parse(localStorage.getItem('recentGenerations') || '[]');
+            const container = document.getElementById('recentList');
+
+            if (recent.length === 0) {
+                container.innerHTML = '<p class="text-muted text-center">No recent generations</p>';
+                return;
+            }
+
+            container.innerHTML = recent.map(item => `
+                <div class="border-bottom pb-2 mb-2">
+                    <small class="text-muted">${new Date(item.timestamp).toLocaleString()}</small>
+                    <div class="text-truncate">${item.text}</div>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>
