@@ -39,26 +39,48 @@ class TTSPipeline:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # TTS providers configuration
+        # self.providers = {
+        #     "bark": {
+        #         "enabled": self._check_bark(),
+        #         "priority": 1,
+        #         "quality": "very_high",
+        #         "speed": "medium"
+        #     },
+        #     "elevenlabs": {
+        #         "enabled": self._check_elevenlabs(),
+        #         "priority": 2,
+        #         "quality": "high",
+        #         "speed": "fast"
+        #     },
+        #     "edge_tts": {
+        #         "enabled": self._check_edge_tts(),
+        #         "priority": 3,
+        #         "quality": "medium",
+        #         "speed": "very_fast"
+        #     },
+        #     "espnet": {
+        #         "enabled": self._check_espnet(),
+        #         "priority": 4,
+        #         "quality": "medium",
+        #         "speed": "medium"
+        #     }
+        # }
         self.providers = {
-            "elevenlabs": {
-                "enabled": self._check_elevenlabs(),
-                "priority": 1,
-                "quality": "high",
-                "speed": "fast"
-            },
-            "edge_tts": {
-                "enabled": self._check_edge_tts(),
-                "priority": 2,
-                "quality": "medium",
-                "speed": "very_fast"
-            },
-            "espnet": {
-                "enabled": self._check_espnet(),
-                "priority": 3,
-                "quality": "medium",
-                "speed": "medium"
+            "bark": {
+            "enabled": self._check_bark(),
+            "priority": 1,
+            "quality": "very_high",
+            "speed": "medium"
             }
         }
+
+        # Fail fast if Bark is not available
+        if not self.providers["bark"]["enabled"]:
+            raise RuntimeError(
+                "Bark TTS is required but not available. "
+                "Please install bark and its dependencies."
+            )
+
 
         # Audio configuration
         self.target_sample_rate = 16000
@@ -71,6 +93,23 @@ class TTSPipeline:
 
         logger.info("TTS Pipeline initialized")
         self._log_available_providers()
+
+    def _check_bark(self) -> bool:
+        """Check if Bark is available"""
+        try:
+            from bark import SAMPLE_RATE, generate_audio, preload_models
+            logger.info("Bark TTS available")
+            return True
+
+        except ImportError as e:
+            logger.warning(f"Bark TTS not available: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Bark TTS check failed: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Bark TTS check failed: {e}")
+            return False
 
     def _check_elevenlabs(self) -> bool:
         """Check if ElevenLabs is available"""
@@ -132,7 +171,9 @@ class TTSPipeline:
                 continue
 
             try:
-                if provider_name == "elevenlabs":
+                if provider_name == "bark":
+                    voices[provider_name] = self._get_bark_voices()
+                elif provider_name == "elevenlabs":
                     voices[provider_name] = self._get_elevenlabs_voices()
                 elif provider_name == "edge_tts":
                     voices[provider_name] = self._get_edge_voices()
@@ -142,6 +183,23 @@ class TTSPipeline:
                 logger.error(f"Failed to get voices for {provider_name}: {str(e)}")
 
         return voices
+
+    def _get_bark_voices(self) -> List[str]:
+        """Get Bark voices with gender tokens"""
+        return [
+            "[WOMAN] Female Voice",
+            "[MAN] Male Voice",
+            "v2/en_speaker_0",
+            "v2/en_speaker_1",
+            "v2/en_speaker_2",
+            "v2/en_speaker_3",
+            "v2/en_speaker_4",
+            "v2/en_speaker_5",
+            "v2/en_speaker_6",
+            "v2/en_speaker_7",
+            "v2/en_speaker_8",
+            "v2/en_speaker_9"
+        ]
 
     def _get_elevenlabs_voices(self) -> List[str]:
         """Get ElevenLabs voices"""
@@ -203,7 +261,9 @@ class TTSPipeline:
             try:
                 logger.info(f"Trying TTS with {provider_name}...")
 
-                if provider_name == "elevenlabs":
+                if provider_name == "bark":
+                    audio_path = await self._generate_bark(text, voice, str(output_path), **kwargs)
+                elif provider_name == "elevenlabs":
                     audio_path = await self._generate_elevenlabs(text, voice, str(output_path), **kwargs)
                 elif provider_name == "edge_tts":
                     audio_path = await self._generate_edge_tts(text, voice, str(output_path), **kwargs)
@@ -327,6 +387,44 @@ class TTSPipeline:
         except Exception as e:
             logger.warning(f"Audio post-processing failed: {str(e)}")
             return audio_path
+
+    async def _generate_bark(self, text: str, voice: str, output_path: str, **kwargs) -> Optional[str]:
+        """Generate audio using Bark"""
+        try:
+            from bark import SAMPLE_RATE, generate_audio, preload_models
+            import scipy.io.wavfile as wavfile
+
+            # Parse voice ID from description if needed
+            if voice and "(" in voice:
+                voice = voice.split("(")[0].strip()
+
+            # Handle special voice tokens
+            if voice == "[WOMAN] Female Voice":
+                voice = "[WOMAN]"
+            elif voice == "[MAN] Male Voice":
+                voice = "[MAN]"
+
+            # Use default voice if not specified
+            if not voice or voice == "Rachel" or voice == "Default Voice":
+                voice = "[WOMAN]"  # Use female voice token
+
+            logger.info(f"Generating audio with Bark using voice: {voice}")
+
+            # Preload models (this will download them on first run)
+            preload_models()
+
+            # Generate audio
+            audio_array = generate_audio(text, history_prompt=voice)
+
+            # Save audio file
+            wavfile.write(output_path, SAMPLE_RATE, audio_array)
+
+            logger.info(f"Bark audio generated: {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.error(f"Bark TTS failed: {str(e)}")
+            return None
 
     async def _generate_elevenlabs(self, text: str, voice: str, output_path: str, **kwargs) -> Optional[str]:
         """Generate audio using ElevenLabs"""
